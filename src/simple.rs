@@ -17,6 +17,7 @@ impl SimpleArena {
         // size in bytes
         let allocation;
         unsafe {
+            // safety: align of one byte means that none of the checks are necessary
             let layout = Layout::from_size_align_unchecked(size, 1);
             allocation = alloc::alloc(layout);
         }
@@ -26,6 +27,9 @@ impl SimpleArena {
     pub fn allocate<T>(&self, object: T) -> Option<ArenaBox<T>> {
         let allocation_size = size_of_val(&object);
         unsafe {
+            // safety: free pointer is guaranteed to be within the arena, provided that no unchecked allocations have been made
+            //         start pointer is guaranteed to be within the arena
+            // checks that there is enough free space to allocate this object
             if self.free_pointer.get().add(allocation_size) <= self.start_pointer.add(self.size) {
                 Some(self.write_to_memory(object, allocation_size))
             } else {
@@ -40,6 +44,7 @@ impl SimpleArena {
     }
 
     unsafe fn write_to_memory<T>(&self, object: T, byte_size: usize) -> ArenaBox<T> {
+        // write the object to memory at the free pointer
         let boxed_object;
         let object_pointer = self.free_pointer.get().cast::<T>();
         let _ = std::mem::replace(&mut *object_pointer, object);
@@ -61,7 +66,9 @@ impl SimpleArena {
 impl Drop for SimpleArena {
     fn drop(&mut self) {
         unsafe {
+            // safety: align of one byte means that none of the checks are necessary
             let layout = Layout::from_size_align_unchecked(self.size, 1);
+            // safety: memory in the arena will not have been deallocated, and layout is the same as size will not change
             alloc::dealloc(self.start_pointer, layout);
         }
     }
