@@ -47,7 +47,7 @@ pub trait ArenaAllocator
         let object_pointer = self.get_free_pointer_mut().cast::<T>();
         let _ = std::ptr::write(object_pointer, object);
         let boxed_object = Box::from_raw(object_pointer);
-        
+
         self.set_free_pointer(self.get_free_pointer_mut().add(byte_size));
         ArenaBox::new(boxed_object)
     }
@@ -76,4 +76,3 @@ impl<'a, T, A: ArenaAllocator> DerefMut for ArenaBox<'a, T, A> {
         &mut self.inner
     }
 }
-

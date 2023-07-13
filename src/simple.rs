@@ -150,3 +150,57 @@ impl Debug for AtomicSimpleArena {
         write!(f, "Arena values: {:?}", segment)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    #[test]
+    fn simple_allocation() {
+        let expected_slice: Vec<u8> = [0u8; 100].iter().enumerate().map(|(i, _e)| i as u8).collect();
+
+        let arena = SimpleArena::new(100).unwrap();
+        let start_ptr = arena.get_free_pointer_mut();
+        for i in 0..100_u8 {
+            let _ = arena.allocate(i).unwrap();
+        }
+
+        let arena_values = unsafe { read_memory_segment(start_ptr.cast_const(), 100) };
+        assert_eq!(expected_slice.as_slice(), arena_values);
+    }
+
+
+    #[test]
+    fn atomic_simple_allocation() {
+        let arena = AtomicSimpleArena::new(64).unwrap();
+        let start_ptr = arena.get_free_pointer_mut();
+        let arena_2 = arena.clone();
+        let arena_3 = arena.clone();
+
+        let thread1 = thread::spawn(move || {
+            for _i in 0..32 {
+                arena_2.allocate(10_i8);
+            }
+        });
+
+        let thread2 = thread::spawn(move || {
+            for _i in 0..32 {
+                arena_3.allocate(20_i8);
+            }
+        });
+
+        let _ = thread1.join();
+        let _ = thread2.join();
+
+        // threads have allocated all 64 bytes
+        // further allocations should fail
+        assert!(arena.allocate(0).is_none());
+
+        // all values should be 10 or 20
+        let arena_values = unsafe { read_memory_segment(start_ptr.cast_const(), 64) };
+        for val in arena_values.iter().cloned() {
+            assert!(val == 10 || val == 20)
+        }
+    }
+}
