@@ -1,4 +1,4 @@
-use arena_alloc::simple::SimpleArena;
+use arena_alloc::{simple::SimpleArena, ArenaAllocator};
 use std::time::Instant;
 
 #[allow(dead_code)]
@@ -17,7 +17,7 @@ impl Default for ComplicatedStruct {
 fn arena_test() {
     let start = Instant::now();
     let mut stored = Vec::with_capacity(250000);
-    let arena = SimpleArena::new(10000000);
+    let arena = SimpleArena::new(10000000).unwrap();
     for _i in 0..250000 {
         let allocation = arena.allocate(ComplicatedStruct::default()).unwrap();
         stored.push(allocation);
