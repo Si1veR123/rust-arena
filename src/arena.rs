@@ -44,10 +44,10 @@ pub trait ArenaAllocator
 
     unsafe fn write_to_memory<T>(&self, object: T, byte_size: usize) -> ArenaBox<T, Self> {
         // write the object to memory at the free pointer
-        let boxed_object;
         let object_pointer = self.get_free_pointer_mut().cast::<T>();
-        let _ = std::mem::replace(&mut *object_pointer, object);
-        boxed_object = Box::from_raw(object_pointer);
+        let _ = std::ptr::write(object_pointer, object);
+        let boxed_object = Box::from_raw(object_pointer);
+        
         self.set_free_pointer(self.get_free_pointer_mut().add(byte_size));
         ArenaBox::new(boxed_object)
     }

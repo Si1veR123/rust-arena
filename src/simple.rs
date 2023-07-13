@@ -4,7 +4,7 @@ use std::mem::size_of_val;
 use std::fmt::Debug;
 use std::ops::Add;
 use std::sync::{Mutex, MutexGuard};
-use std::sync::{Arc, atomic::AtomicPtr};
+use std::sync::Arc;
 use super::arena::{ArenaAllocator, ArenaBox};
 use super::misc::read_memory_segment;
 
@@ -80,10 +80,9 @@ impl AtomicSimpleArena {
         let ptr = *ptr_lock as *mut u8;
 
         // write the object to memory at the free pointer
-        let boxed_object;
         let object_pointer = ptr.cast::<T>();
-        let _ = std::mem::replace(&mut *object_pointer, object);
-        boxed_object = Box::from_raw(object_pointer);
+        std::ptr::write(object_pointer, object);
+        let boxed_object = Box::from_raw(object_pointer);
 
         *ptr_lock = ptr_lock.add(byte_size);
         ArenaBox::new(boxed_object)
