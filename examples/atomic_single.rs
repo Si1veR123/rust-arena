@@ -1,10 +1,10 @@
-use arena_alloc::simple::AtomicSimpleArena;
+use arena_alloc::single::AtomicSingleArena;
 use arena_alloc::ArenaAllocator;
 use std::thread;
 
 
 fn main() {
-    let arena = AtomicSimpleArena::new(64).unwrap();
+    let arena = AtomicSingleArena::new(64).unwrap();
     let arena_2 = arena.clone();
     let arena_3 = arena.clone();
 

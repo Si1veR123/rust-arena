@@ -8,13 +8,13 @@ use std::sync::Arc;
 use super::arena::{ArenaAllocator, ArenaBox};
 use super::misc::read_memory_segment;
 
-pub struct SimpleArena {
+pub struct SingleArena {
     size: usize,
     start_pointer: *mut u8,
     free_pointer: Cell<*mut u8>
 }
 
-impl ArenaAllocator for SimpleArena {
+impl ArenaAllocator for SingleArena {
     unsafe fn new_unchecked(size: usize) -> Self {
         let allocation = Self::intialise_arena(size);
         Self { size, start_pointer: allocation, free_pointer: Cell::new(allocation) }
@@ -51,7 +51,7 @@ impl ArenaAllocator for SimpleArena {
     }
 }
 
-impl Drop for SimpleArena {
+impl Drop for SingleArena {
     fn drop(&mut self) {
         unsafe {
             self.deallocate_arena()
@@ -59,7 +59,7 @@ impl Drop for SimpleArena {
     }
 }
 
-impl Debug for SimpleArena {
+impl Debug for SingleArena {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let segment = unsafe { read_memory_segment(self.start_pointer.cast_const(), self.size) };
         write!(f, "Arena values: {:?}", segment)
@@ -67,14 +67,14 @@ impl Debug for SimpleArena {
 }
 
 #[derive(Clone)]
-pub struct AtomicSimpleArena {
+pub struct AtomicSingleArena {
     size: usize,
     // raw pointers aren't send + sync, so easiest way to make the struct send + sync is represent the pointer as a usize
     start_pointer: usize,
     free_pointer: Arc<Mutex<usize>>
 }
 
-impl AtomicSimpleArena {
+impl AtomicSingleArena {
     // similar to write_to_memory, however uses a mutex lock on the free pointer
     unsafe fn write_to_memory_with_lock<T>(&self, mut ptr_lock: MutexGuard<'_, usize>, object: T, byte_size: usize) -> ArenaBox<T, Self> {
         let ptr = *ptr_lock as *mut u8;
@@ -89,7 +89,7 @@ impl AtomicSimpleArena {
     }
 }
 
-impl ArenaAllocator for AtomicSimpleArena {
+impl ArenaAllocator for AtomicSingleArena {
     unsafe fn new_unchecked(size: usize) -> Self {
         let allocation = Self::intialise_arena(size);
         Self { size, start_pointer: allocation as usize, free_pointer: Arc::new(Mutex::new(allocation as usize)) }
@@ -111,16 +111,16 @@ impl ArenaAllocator for AtomicSimpleArena {
     }
 
     unsafe fn write_to_memory<T>(&self, object: T, byte_size: usize) -> ArenaBox<T, Self> {
-        let ptr_lock = self.free_pointer.lock().expect("Error locking mutex in Atomic Simple Arena");
+        let ptr_lock = self.free_pointer.lock().expect("Error locking mutex in Atomic Single Arena");
         self.write_to_memory_with_lock(ptr_lock, object, byte_size)
     }
 
     fn get_free_pointer_mut(&self) -> *mut u8 {
-        *self.free_pointer.lock().expect("Error locking mutex in Atomic Simple Arena") as *mut u8
+        *self.free_pointer.lock().expect("Error locking mutex in Atomic Single Arena") as *mut u8
     }
 
     unsafe fn set_free_pointer(&self, ptr: *mut u8) {
-        let mut lock = self.free_pointer.lock().expect("Error locking mutex in Atomic Simple Arena");
+        let mut lock = self.free_pointer.lock().expect("Error locking mutex in Atomic Single Arena");
         *lock = ptr as usize;
     }
 
@@ -134,7 +134,7 @@ impl ArenaAllocator for AtomicSimpleArena {
 }
 
 
-impl Drop for AtomicSimpleArena {
+impl Drop for AtomicSingleArena {
     fn drop(&mut self) {
         let remaining_arena_copies = Arc::strong_count(&self.free_pointer);
         if remaining_arena_copies == 1 {
@@ -144,7 +144,7 @@ impl Drop for AtomicSimpleArena {
     }
 }
 
-impl Debug for AtomicSimpleArena {
+impl Debug for AtomicSingleArena {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let segment = unsafe { read_memory_segment((self.start_pointer as *mut u8).cast_const(), self.size) };
         write!(f, "Arena values: {:?}", segment)
@@ -157,10 +157,10 @@ mod tests {
     use std::thread;
 
     #[test]
-    fn simple_allocation() {
+    fn single_allocation() {
         let expected_slice: Vec<u8> = [0u8; 100].iter().enumerate().map(|(i, _e)| i as u8).collect();
 
-        let arena = SimpleArena::new(100).unwrap();
+        let arena = SingleArena::new(100).unwrap();
         let start_ptr = arena.get_free_pointer_mut();
         for i in 0..100_u8 {
             let _ = arena.allocate(i).unwrap();
@@ -172,8 +172,8 @@ mod tests {
 
 
     #[test]
-    fn atomic_simple_allocation() {
-        let arena = AtomicSimpleArena::new(64).unwrap();
+    fn atomic_single_allocation() {
+        let arena = AtomicSingleArena::new(64).unwrap();
         let start_ptr = arena.get_free_pointer_mut();
         let arena_2 = arena.clone();
         let arena_3 = arena.clone();
@@ -202,5 +202,8 @@ mod tests {
         for val in arena_values.iter().cloned() {
             assert!(val == 10 || val == 20)
         }
+
+        // keep alive until the end
+        drop(arena);
     }
 }
