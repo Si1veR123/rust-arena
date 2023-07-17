@@ -1,24 +1,40 @@
 
-use arena_alloc::{chunked::Arena, ArenaAllocator, single::SingleArena};
+use std::time::Instant;
 
-trait Sound {
-    fn quack(&self);
-}
+use arena_alloc::{chunked::Arena, ArenaAllocator};
 
-struct Duck {
-    sound: String
-}
+fn arena_test() {
+    let start = Instant::now();
 
-impl Sound for Duck {
-    fn quack(&self) {
-        println!("{}", &self.sound);
+    let arena: Arena = Arena::new();
+    let mut allocations = Vec::with_capacity(2500);
+    
+    for i in 0..2500 {
+        allocations.push(arena.allocate(i));
     }
+
+    assert!(**allocations.last().unwrap() == 2499);
+
+    let end = Instant::now();
+    println!("Arena took {:?}", end-start);
+}
+
+fn heap_test() {
+    let start = Instant::now();
+
+    let mut allocations = Vec::with_capacity(2500);
+
+    for i in 0..2500 {
+        allocations.push(Box::new(i));
+    }
+
+    assert!(**allocations.last().unwrap() == 2499);
+
+    let end = Instant::now();
+    println!("Heap took {:?}", end-start);
 }
 
 fn main() {
-    let arena: Arena<SingleArena> = Arena::new();
-    
-    for i in 0..5000 {
-        arena.allocate(i);
-    }
+    arena_test();
+    heap_test();
 }

@@ -14,7 +14,7 @@ impl Default for ComplicatedStruct {
     }
 }
 
-fn arena_test() {
+fn single_arena_test() {
     let start = Instant::now();
     let arena = SingleArena::new(10000000).unwrap();
     let mut stored = Vec::with_capacity(250000);
@@ -40,6 +40,6 @@ fn heap_test() {
 }
 
 fn main() {
-    arena_test();
+    single_arena_test();
     heap_test();
 }
