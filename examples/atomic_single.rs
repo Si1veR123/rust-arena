@@ -1,5 +1,5 @@
 use arena_alloc::single::AtomicSingleArena;
-use arena_alloc::ArenaAllocator;
+use arena_alloc::ArenaChunk;
 use std::thread;
 
 

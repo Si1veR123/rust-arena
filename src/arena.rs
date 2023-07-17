@@ -1,27 +1,47 @@
 use std::alloc::Layout;
 use std::mem::{ManuallyDrop, size_of_val};
-use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::alloc;
 
-pub trait ArenaAllocator
-    where Self: Sized {
-    // create a new arena without checking whether the size is valid
+pub trait ArenaAllocator<C: ArenaChunk> {
+    fn new() -> Self;
+    fn allocate<T>(&self, object: T) -> ArenaBox<T, C>;
+}
+
+/// Objects implementing this trait can be used as a 'chunk' or 'block' in arena allocators
+pub trait ArenaChunk: Sized {
+    /// Create a new chunk without checking whether the size is valid
+    /// 
+    /// Can cause UB if size is 0
     unsafe fn new_unchecked(size: usize) -> Self;
 
-    // allocate an object in the arena. could return None if the arena doesn't have the capacity for the object
+    /// Allocate an object in the chunk.
+    /// 
+    /// Return None if the chunk doesn't have the capacity for the object.
     fn allocate<T>(&self, object: T) -> Option<ArenaBox<T, Self>>;
 
-    // deallocate the memory used by the arena
-    // UB if used before dropped
-    unsafe fn deallocate_arena(&mut self);
+    /// Return a pointer to the start of the arena's memory.
+    fn get_start_pointer_mut(&self) -> *mut u8;
 
-    // return a pointer to the next place to write an object
+    /// Return a pointer to the next place to write an object in the chunk.
     fn get_free_pointer_mut(&self) -> *mut u8;
 
-    // set the free pointer to a new address
+    /// Set the free pointer to a new pointer.
+    /// 
+    /// UB if the pointer is set outside of the arena, or overwrites allocated objects.
     unsafe fn set_free_pointer(&self, ptr: *mut u8);
 
+    /// The remaining capacity of the chunk in bytes.
+    fn remaining_capacity(&self) -> usize;
+
+    /// Adjust a counter of the number of allocations in the arena chunk.
+    /// 
+    /// This is handled in the allocation methods and when allocations are dropped.
+    fn adjust_allocation_count(&self, count: isize);
+
+    fn size(&self) -> usize;
+
+    /// Create a new chunk, checking that size is greater than 0
     fn new(size: usize) -> Option<Self> {
         if size == 0 {
             None
@@ -30,49 +50,88 @@ pub trait ArenaAllocator
         }
     }
 
-    unsafe fn intialise_arena(size: usize) -> *mut u8 {
+    /// Allocate the memory needed for this chunk.
+    /// 
+    /// Returns a pointer to the start of the allocation.
+    /// 
+    /// UB if size is 0.
+    /// Aborts process in an allocation error.
+    unsafe fn intialise_chunk(size: usize) -> *mut u8 {
         // safety: align of one byte means that none of the checks are necessary
         // CAN BE UNSAFE IF SIZE IS 0
         let layout = Layout::from_size_align_unchecked(size, 1);
-        alloc::alloc(layout)
+        let ptr = alloc::alloc(layout);
+        if ptr.is_null() {
+            alloc::handle_alloc_error(layout)
+        }
+        ptr
     }
 
+    /// Allocate an object without checking:
+    /// 
+    /// * If it is a ZST
+    /// 
+    /// * If there is enough remaining capacity for the object
     unsafe fn allocate_unchecked<T>(&self, object: T) -> ArenaBox<T, Self> {
         let allocation_size = size_of_val(&object);
         self.write_to_memory(object, allocation_size)
     }
 
-    unsafe fn write_to_memory<T>(&self, object: T, byte_size: usize) -> ArenaBox<T, Self> {
+    /// Write a given object of size `byte_size` to memory at the free pointer.
+    /// 
+    /// Adjusts the free pointer and allocation count accordingly.
+    unsafe fn write_to_memory<'a, T>(&'a self, object: T, byte_size: usize) -> ArenaBox<'a, T, Self> {
         // write the object to memory at the free pointer
         let object_pointer = self.get_free_pointer_mut().cast::<T>();
         let _ = std::ptr::write(object_pointer, object);
         let boxed_object = Box::from_raw(object_pointer);
 
         self.set_free_pointer(self.get_free_pointer_mut().add(byte_size));
-        ArenaBox::new(boxed_object)
+
+        self.adjust_allocation_count(1);
+        ArenaBox::new(&self, boxed_object)
+    }
+
+    /// Deallocate the memory used by the arena.
+    /// 
+    /// UB if used after deallocated.
+    /// Memory is deallocated when the chunk is dropped.
+    unsafe fn deallocate_arena(&mut self) {
+        // safety: align of one byte means that none of the checks are necessary
+        let layout = Layout::from_size_align_unchecked(self.size(), 1);
+        // safety: memory in the arena will not have been deallocated, and layout is the same as size will not change
+        // unsafe if the arena is dropped and attempted to be used again
+        alloc::dealloc(self.get_start_pointer_mut(), layout);
     }
 }
 
-pub struct ArenaBox<'a, T, A: ArenaAllocator> {
+/// A wrapper around box that points to memory allocated in an arena.
+pub struct ArenaBox<'a, T, A: ArenaChunk> {
     inner: ManuallyDrop<Box<T>>,
-    arena: PhantomData<&'a A>
+    arena: &'a A
 }
 
-impl<'a, T, A: ArenaAllocator> ArenaBox<'a, T, A> {
-    pub fn new(boxed_object: Box<T>) -> Self {
-        Self { inner: ManuallyDrop::new(boxed_object), arena: PhantomData }
+impl<'a, T, A: ArenaChunk> ArenaBox<'a, T, A> {
+    pub fn new(arena: &'a A, boxed_object: Box<T>) -> Self {
+        Self { inner: ManuallyDrop::new(boxed_object), arena: arena }
     }
 }
 
-impl<'a, T, A: ArenaAllocator> Deref for ArenaBox<'a, T, A> {
+impl<'a, T, A: ArenaChunk> Deref for ArenaBox<'a, T, A> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<'a, T, A: ArenaAllocator> DerefMut for ArenaBox<'a, T, A> {
+impl<'a, T, A: ArenaChunk> DerefMut for ArenaBox<'a, T, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
+    }
+}
+
+impl<'a, T, A: ArenaChunk> Drop for ArenaBox<'a, T, A> {
+    fn drop(&mut self) {
+        self.arena.adjust_allocation_count(-1);
     }
 }

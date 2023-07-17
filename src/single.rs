@@ -1,37 +1,54 @@
-use std::alloc::{self, Layout};
 use std::cell::Cell;
 use std::mem::size_of_val;
 use std::fmt::Debug;
 use std::ops::Add;
+use std::ptr::NonNull;
 use std::sync::{Mutex, MutexGuard};
 use std::sync::Arc;
-use super::arena::{ArenaAllocator, ArenaBox};
+
+use super::arena::{ArenaChunk, ArenaBox};
 use super::misc::read_memory_segment;
 
+/// A single 'chunk' or 'block' of allocated memory.
+/// 
+/// The chunk has a constant size, and only allocates memory once, when creating the chunk.
+/// This means that allocations can fail if there is no capacity remaining.
 pub struct SingleArena {
     size: usize,
     start_pointer: *mut u8,
-    free_pointer: Cell<*mut u8>
+    free_pointer: Cell<*mut u8>,
+    pub allocations: Cell<usize>
 }
 
-impl ArenaAllocator for SingleArena {
+impl ArenaChunk for SingleArena {
     unsafe fn new_unchecked(size: usize) -> Self {
-        let allocation = Self::intialise_arena(size);
-        Self { size, start_pointer: allocation, free_pointer: Cell::new(allocation) }
+        let allocation = Self::intialise_chunk(size);
+        Self { size, start_pointer: allocation, free_pointer: Cell::new(allocation), allocations: Cell::new(0) }
     }
 
     fn allocate<T>(&self, object: T) -> Option<ArenaBox<T, Self>> {
         let allocation_size = size_of_val(&object);
+
         unsafe {
+            // handle zst
+            if allocation_size == 0 {
+                return Some(ArenaBox::new(&self, Box::from_raw(NonNull::dangling().as_ptr())))
+            }
+
             // safety: free pointer is guaranteed to be within the arena, provided that no unchecked allocations have been made
             //         start pointer is guaranteed to be within the arena
             // checks that there is enough free space to allocate this object
-            if self.free_pointer.get().add(allocation_size) <= self.start_pointer.add(self.size) {
+            if allocation_size <= self.remaining_capacity() {
                 Some(self.write_to_memory(object, allocation_size))
             } else {
                 None
             }
         }
+    }
+
+    #[inline]
+    fn get_start_pointer_mut(&self) -> *mut u8 {
+        self.start_pointer
     }
 
     fn get_free_pointer_mut(&self) -> *mut u8 {
@@ -42,12 +59,17 @@ impl ArenaAllocator for SingleArena {
         self.free_pointer.set(ptr)
     }
 
-    unsafe fn deallocate_arena(&mut self) {
-        // safety: align of one byte means that none of the checks are necessary
-        let layout = Layout::from_size_align_unchecked(self.size, 1);
-        // safety: memory in the arena will not have been deallocated, and layout is the same as size will not change
-        // unsafe if the arena is dropped and attempted to be used again
-        alloc::dealloc(self.start_pointer, layout);
+    fn remaining_capacity(&self) -> usize {
+        (self.start_pointer as usize + self.size) - self.free_pointer.get() as usize
+    }
+
+    fn adjust_allocation_count(&self, count: isize) {
+        self.allocations.set(self.allocations.get().checked_add_signed(count).expect("Allocation count overflow (too many allocations)"))
+    }
+
+    #[inline]
+    fn size(&self) -> usize {
+        self.size
     }
 }
 
@@ -66,12 +88,17 @@ impl Debug for SingleArena {
     }
 }
 
+
+/// Same as `SingleArena`, however is thread safe.
+/// 
+/// The arena can be cloned without allocating new memory, see atomic_single example.
 #[derive(Clone)]
 pub struct AtomicSingleArena {
     size: usize,
     // raw pointers aren't send + sync, so easiest way to make the struct send + sync is represent the pointer as a usize
     start_pointer: usize,
-    free_pointer: Arc<Mutex<usize>>
+    free_pointer: Arc<Mutex<usize>>,
+    allocations: Arc<Mutex<usize>>
 }
 
 impl AtomicSingleArena {
@@ -85,18 +112,27 @@ impl AtomicSingleArena {
         let boxed_object = Box::from_raw(object_pointer);
 
         *ptr_lock = ptr_lock.add(byte_size);
-        ArenaBox::new(boxed_object)
+        self.adjust_allocation_count(1);
+        ArenaBox::new(&self, boxed_object)
     }
 }
 
-impl ArenaAllocator for AtomicSingleArena {
+impl ArenaChunk for AtomicSingleArena {
     unsafe fn new_unchecked(size: usize) -> Self {
-        let allocation = Self::intialise_arena(size);
-        Self { size, start_pointer: allocation as usize, free_pointer: Arc::new(Mutex::new(allocation as usize)) }
+        let allocation = Self::intialise_chunk(size);
+        Self { size, start_pointer: allocation as usize, free_pointer: Arc::new(Mutex::new(allocation as usize)), allocations: Arc::new(Mutex::new(0))}
     }
 
     fn allocate<T>(&self, object: T) -> Option<ArenaBox<T, Self>> {
         let allocation_size = size_of_val(&object);
+
+        // handle zst
+        unsafe {
+            if allocation_size == 0 {
+                return Some(ArenaBox::new(&self, Box::from_raw(NonNull::dangling().as_ptr())))
+            }
+        }
+
         let ptr_lock = self.free_pointer.lock().ok()?;
         unsafe {
             // safety: free pointer is guaranteed to be within the arena, provided that no unchecked allocations have been made
@@ -111,10 +147,18 @@ impl ArenaAllocator for AtomicSingleArena {
     }
 
     unsafe fn write_to_memory<T>(&self, object: T, byte_size: usize) -> ArenaBox<T, Self> {
+        self.adjust_allocation_count(1);
         let ptr_lock = self.free_pointer.lock().expect("Error locking mutex in Atomic Single Arena");
         self.write_to_memory_with_lock(ptr_lock, object, byte_size)
     }
 
+    fn get_start_pointer_mut(&self) -> *mut u8 {
+        self.start_pointer as *mut u8
+    }
+
+    /// Returns a pointer to the next place to write an object to the chunk.
+    /// 
+    /// Requires acquiring a mutex lock.
     fn get_free_pointer_mut(&self) -> *mut u8 {
         *self.free_pointer.lock().expect("Error locking mutex in Atomic Single Arena") as *mut u8
     }
@@ -124,12 +168,17 @@ impl ArenaAllocator for AtomicSingleArena {
         *lock = ptr as usize;
     }
 
-    unsafe fn deallocate_arena(&mut self) {
-        // safety: align of one byte means that none of the checks are necessary
-        let layout = Layout::from_size_align_unchecked(self.size, 1);
-        // safety: memory in the arena will not have been deallocated, and layout is the same as size will not change
-        // unsafe if the arena is dropped and attempted to be used again
-        alloc::dealloc(self.start_pointer as *mut u8, layout);
+    fn remaining_capacity(&self) -> usize {
+        (self.start_pointer + self.size) - self.get_free_pointer_mut() as usize
+    }
+
+    fn adjust_allocation_count(&self, count: isize) {
+        let mut lock = self.allocations.lock().expect("Error locking mutex in Atomic Single Arena");
+        *lock = lock.checked_add_signed(count).expect("Allocation count overflow (too many allocations)");
+    }
+
+    fn size(&self) -> usize {
+        self.size
     }
 }
 
@@ -151,6 +200,7 @@ impl Debug for AtomicSingleArena {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,7 +219,6 @@ mod tests {
         let arena_values = unsafe { read_memory_segment(start_ptr.cast_const(), 100) };
         assert_eq!(expected_slice.as_slice(), arena_values);
     }
-
 
     #[test]
     fn atomic_single_allocation() {
@@ -202,7 +251,7 @@ mod tests {
         for val in arena_values.iter().cloned() {
             assert!(val == 10 || val == 20)
         }
-
+        
         // keep alive until the end
         drop(arena);
     }
