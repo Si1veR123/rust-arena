@@ -19,7 +19,7 @@ pub struct Arena<C: ArenaChunk> {
 
 impl<C: ArenaChunk> Arena<C> {
     unsafe fn new_chunk(&self, min_size: usize) {
-        let chunk = C::new_unchecked(std::cmp::min(min_size, CHUNK_SIZE));
+        let chunk = C::new_unchecked(std::cmp::max(min_size, CHUNK_SIZE));
         (&mut *self.chunks.get()).push_back(chunk);
     }
 }
@@ -43,6 +43,7 @@ impl<C: ArenaChunk> ArenaAllocator<C> for Arena<C> {
 
         // create new chunk
         unsafe {
+            println!("ALLOCATING");
             self.new_chunk(size_of_val(&object));
             let chunk = chunks.back().unwrap();
             return chunk.allocate_unchecked(object)
