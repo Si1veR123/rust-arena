@@ -1,7 +1,7 @@
 
 use std::time::Instant;
 
-use arena_alloc::{chunked::Arena, ArenaAllocator};
+use arena::{Arena, ArenaAllocator};
 
 fn arena_test() {
     let start = Instant::now();

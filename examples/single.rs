@@ -1,4 +1,5 @@
-use arena_alloc::{single::SingleArena, ArenaChunk};
+use arena::single::SingleArena;
+use arena::ArenaChunk;
 use std::time::Instant;
 
 #[allow(dead_code)]

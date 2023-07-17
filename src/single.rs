@@ -6,7 +6,8 @@ use std::ptr::NonNull;
 use std::sync::{Mutex, MutexGuard};
 use std::sync::Arc;
 
-use super::arena::{ArenaChunk, ArenaBox};
+use super::arena_trait::ArenaChunk;
+use super::ArenaBox;
 use super::misc::read_memory_segment;
 
 /// A single 'chunk' or 'block' of allocated memory.
