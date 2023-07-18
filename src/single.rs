@@ -33,7 +33,7 @@ impl ArenaChunk for SingleArena {
         unsafe {
             // handle zst
             if allocation_size == 0 {
-                return Some(ArenaBox::new(&self, Box::from_raw(NonNull::dangling().as_ptr())))
+                return Some(ArenaBox::new(&self, NonNull::dangling()))
             }
         }
 
@@ -114,11 +114,12 @@ impl AtomicSingleArena {
         // write the object to memory at the free pointer
         let object_pointer = ptr.cast::<T>();
         std::ptr::write(object_pointer, object);
-        let boxed_object = Box::from_raw(object_pointer);
 
         *ptr_lock = ptr_lock.add(byte_size + offset);
         self.adjust_allocation_count(1);
-        ArenaBox::new(&self, boxed_object)
+
+        // safety: object pointer is non-null
+        ArenaBox::new(&self, NonNull::new_unchecked(object_pointer))
     }
 }
 
@@ -134,7 +135,7 @@ impl ArenaChunk for AtomicSingleArena {
         // handle zst
         unsafe {
             if allocation_size == 0 {
-                return Some(ArenaBox::new(&self, Box::from_raw(NonNull::dangling().as_ptr())))
+                return Some(ArenaBox::new(&self, NonNull::dangling()))
             }
         }
 

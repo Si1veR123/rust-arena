@@ -1,6 +1,7 @@
 use std::alloc::Layout;
 use std::mem::{size_of_val, align_of_val};
 use std::alloc;
+use std::ptr::NonNull;
 
 use super::ArenaBox;
 
@@ -88,13 +89,14 @@ pub trait ArenaChunk: Sized {
         // write the object to memory at the free pointer
         // offset should make the allocation be aligned
         let object_pointer = self.get_free_pointer_mut().add(offset).cast::<T>();
-        let _ = std::ptr::write(object_pointer, object);
-        let boxed_object = Box::from_raw(object_pointer);
+        std::ptr::write(object_pointer, object);
 
         self.set_free_pointer(self.get_free_pointer_mut().add(byte_size + offset));
 
         self.adjust_allocation_count(1);
-        ArenaBox::new(&self, boxed_object)
+        
+        // safety:: object pointer is non-null
+        ArenaBox::new(&self, NonNull::new_unchecked(object_pointer))
     }
 
     /// Deallocate the memory used by the arena.
