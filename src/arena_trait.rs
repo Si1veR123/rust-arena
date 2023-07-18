@@ -1,5 +1,5 @@
 use std::alloc::Layout;
-use std::mem::size_of_val;
+use std::mem::{size_of_val, align_of_val};
 use std::alloc;
 
 use super::ArenaBox;
@@ -75,19 +75,23 @@ pub trait ArenaChunk: Sized {
     /// * If there is enough remaining capacity for the object
     unsafe fn allocate_unchecked<T>(&self, object: T) -> ArenaBox<T, Self> {
         let allocation_size = size_of_val(&object);
-        self.write_to_memory(object, allocation_size)
+        let offset = self.get_free_pointer_mut().align_offset(align_of_val(&object));
+        self.write_to_memory(object, allocation_size, offset)
     }
 
     /// Write a given object of size `byte_size` to memory at the free pointer.
     /// 
     /// Adjusts the free pointer and allocation count accordingly.
-    unsafe fn write_to_memory<'a, T>(&'a self, object: T, byte_size: usize) -> ArenaBox<'a, T, Self> {
+    /// 
+    /// Free pointer + offset should be an aligned address for the object
+    unsafe fn write_to_memory<'a, T>(&'a self, object: T, byte_size: usize, offset: usize) -> ArenaBox<'a, T, Self> {
         // write the object to memory at the free pointer
-        let object_pointer = self.get_free_pointer_mut().cast::<T>();
+        // offset should make the allocation be aligned
+        let object_pointer = self.get_free_pointer_mut().add(offset).cast::<T>();
         let _ = std::ptr::write(object_pointer, object);
         let boxed_object = Box::from_raw(object_pointer);
 
-        self.set_free_pointer(self.get_free_pointer_mut().add(byte_size));
+        self.set_free_pointer(self.get_free_pointer_mut().add(byte_size + offset));
 
         self.adjust_allocation_count(1);
         ArenaBox::new(&self, boxed_object)

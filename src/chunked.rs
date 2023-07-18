@@ -10,11 +10,6 @@ use std::mem::size_of_val;
 const CHUNK_SIZE: usize = 4096;
 
 pub struct Arena {
-    // UnsafeCell is required as allocations given out will have a read-only reference to an arena chunk,
-    // however allocating requires a mutable reference to the list of chunks. The arena guarantees that the
-    // reference to the arena chunk will live as long as the arena, as no arena chunks are dropped. This means
-    // that the list of chunks can be mutated through unsafe cell, as long as the read-only references are still valid.
-    // Therefore mutating the list shouldn't delete any entries.
     chunks: UnshrinkableLinkedList<SingleArena>
 }
 

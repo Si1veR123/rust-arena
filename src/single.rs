@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::mem::size_of_val;
+use std::mem::{size_of_val, align_of_val};
 use std::fmt::Debug;
 use std::ops::Add;
 use std::ptr::NonNull;
@@ -35,12 +35,16 @@ impl ArenaChunk for SingleArena {
             if allocation_size == 0 {
                 return Some(ArenaBox::new(&self, Box::from_raw(NonNull::dangling().as_ptr())))
             }
+        }
 
+        let offset = self.get_free_pointer_mut().align_offset(align_of_val(&object));
+
+        unsafe {
             // safety: free pointer is guaranteed to be within the arena, provided that no unchecked allocations have been made
             //         start pointer is guaranteed to be within the arena
             // checks that there is enough free space to allocate this object
-            if allocation_size <= self.remaining_capacity() {
-                Some(self.write_to_memory(object, allocation_size))
+            if allocation_size + offset <= self.remaining_capacity() {
+                Some(self.write_to_memory(object, allocation_size, offset))
             } else {
                 None
             }
@@ -104,15 +108,15 @@ pub struct AtomicSingleArena {
 
 impl AtomicSingleArena {
     // similar to write_to_memory, however uses a mutex lock on the free pointer
-    unsafe fn write_to_memory_with_lock<T>(&self, mut ptr_lock: MutexGuard<'_, usize>, object: T, byte_size: usize) -> ArenaBox<T, Self> {
-        let ptr = *ptr_lock as *mut u8;
+    unsafe fn write_to_memory_with_lock<T>(&self, mut ptr_lock: MutexGuard<'_, usize>, object: T, byte_size: usize, offset: usize) -> ArenaBox<T, Self> {
+        let ptr = (*ptr_lock as *mut u8).add(offset);
 
         // write the object to memory at the free pointer
         let object_pointer = ptr.cast::<T>();
         std::ptr::write(object_pointer, object);
         let boxed_object = Box::from_raw(object_pointer);
 
-        *ptr_lock = ptr_lock.add(byte_size);
+        *ptr_lock = ptr_lock.add(byte_size + offset);
         self.adjust_allocation_count(1);
         ArenaBox::new(&self, boxed_object)
     }
@@ -135,22 +139,22 @@ impl ArenaChunk for AtomicSingleArena {
         }
 
         let ptr_lock = self.free_pointer.lock().ok()?;
+        let offset = (*ptr_lock as *mut u8).align_offset(align_of_val(&object));
         unsafe {
             // safety: free pointer is guaranteed to be within the arena, provided that no unchecked allocations have been made
             //         start pointer is guaranteed to be within the arena
             // checks that there is enough free space to allocate this object
             if ptr_lock.add(allocation_size) <= self.start_pointer + self.size {
-                Some(self.write_to_memory_with_lock(ptr_lock, object, allocation_size))
+                Some(self.write_to_memory_with_lock(ptr_lock, object, allocation_size, offset))
             } else {
                 None
             }
         }
     }
 
-    unsafe fn write_to_memory<T>(&self, object: T, byte_size: usize) -> ArenaBox<T, Self> {
-        self.adjust_allocation_count(1);
+    unsafe fn write_to_memory<T>(&self, object: T, byte_size: usize, offset: usize) -> ArenaBox<T, Self> {
         let ptr_lock = self.free_pointer.lock().expect("Error locking mutex in Atomic Single Arena");
-        self.write_to_memory_with_lock(ptr_lock, object, byte_size)
+        self.write_to_memory_with_lock(ptr_lock, object, byte_size, offset)
     }
 
     fn get_start_pointer_mut(&self) -> *mut u8 {

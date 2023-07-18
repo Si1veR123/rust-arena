@@ -1,5 +1,10 @@
 use std::{collections::LinkedList, cell::UnsafeCell};
 
+/// This list allows references to elements in the list and pushing elements to the end of the list, with a shared reference.
+/// 
+/// This is allowed as a linked list ensures that the item references remain valid, and this list doesn't allow the removal or moving of items.
+/// 
+/// Used to store a list of memory blocks in an arena.
 pub(crate) struct UnshrinkableLinkedList<T> {
     inner: UnsafeCell<LinkedList<T>>,
 }
