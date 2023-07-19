@@ -5,7 +5,7 @@ use super::ArenaAllocator;
 use super::ArenaBox;
 use super::chunk_linked_list::UnshrinkableLinkedList;
 
-use std::mem::size_of_val;
+use std::mem::size_of;
 
 const CHUNK_SIZE: usize = 4096;
 
@@ -27,7 +27,7 @@ impl ArenaAllocator<SingleArena> for Arena {
     }
 
     fn allocate<'a, T>(&'a self, object: T) -> ArenaBox<'a, T, SingleArena> {
-        let allocation_size = size_of_val(&object);
+        let allocation_size = size_of::<T>();
 
         if allocation_size == 0 {
             return ArenaBox::new_zero_sized()
@@ -43,7 +43,7 @@ impl ArenaAllocator<SingleArena> for Arena {
 
         // create new chunk
         unsafe {
-            self.new_chunk(size_of_val(&object));
+            self.new_chunk(size_of::<T>());
             let chunk = self.chunks.last().unwrap();
             return chunk.allocate_unchecked(object)
         }

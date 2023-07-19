@@ -1,5 +1,5 @@
 use std::alloc::Layout;
-use std::mem::{size_of_val, align_of_val};
+use std::mem::{size_of, align_of};
 use std::alloc;
 use std::ptr::NonNull;
 
@@ -76,8 +76,8 @@ pub trait ArenaChunk: Sized {
     /// 
     /// * If there is enough remaining capacity for the object
     unsafe fn allocate_unchecked<T>(&self, object: T) -> ArenaBox<T, Self> {
-        let allocation_size = size_of_val(&object);
-        let offset = self.get_free_pointer_mut().align_offset(align_of_val(&object));
+        let allocation_size = size_of::<T>();
+        let offset = self.get_free_pointer_mut().align_offset(align_of::<T>());
         self.write_to_memory(object, allocation_size, offset)
     }
 

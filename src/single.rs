@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::mem::{size_of_val, align_of_val};
+use std::mem::{size_of, align_of};
 use std::ops::Add;
 use std::ptr::NonNull;
 use std::sync::{Mutex, MutexGuard};
@@ -26,14 +26,14 @@ impl ArenaChunk for SingleArena {
     }
 
     fn allocate<T>(&self, object: T) -> Option<ArenaBox<T, Self>> {
-        let allocation_size = size_of_val(&object);
+        let allocation_size = size_of::<T>();
 
         // handle zst
         if allocation_size == 0 {
             return Some(ArenaBox::new_zero_sized())
         }
 
-        let offset = self.get_free_pointer_mut().align_offset(align_of_val(&object));
+        let offset = self.get_free_pointer_mut().align_offset(align_of::<T>());
 
         // checks that there is enough free space to allocate this object
         if allocation_size.checked_add(offset)? <= self.remaining_capacity() {
@@ -119,7 +119,7 @@ impl ArenaChunk for AtomicSingleArena {
     }
 
     fn allocate<T>(&self, object: T) -> Option<ArenaBox<T, Self>> {
-        let allocation_size = size_of_val(&object);
+        let allocation_size = size_of::<T>();
 
         // handle zst
         if allocation_size == 0 {
@@ -127,7 +127,7 @@ impl ArenaChunk for AtomicSingleArena {
         }
 
         let ptr_lock = self.free_pointer.lock().ok()?;
-        let offset = (*ptr_lock as *mut u8).align_offset(align_of_val(&object));
+        let offset = (*ptr_lock as *mut u8).align_offset(align_of::<T>());
 
         // checks that there is enough free space to allocate this object
         if ptr_lock.checked_add(allocation_size)? <= self.start_pointer + self.size {
