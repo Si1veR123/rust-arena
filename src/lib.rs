@@ -1,7 +1,5 @@
 pub mod single;
 
-mod misc;
-
 mod chunk_linked_list;
 
 mod chunked;

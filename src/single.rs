@@ -1,6 +1,5 @@
 use std::cell::Cell;
 use std::mem::{size_of_val, align_of_val};
-use std::fmt::Debug;
 use std::ops::Add;
 use std::ptr::NonNull;
 use std::sync::{Mutex, MutexGuard};
@@ -8,7 +7,6 @@ use std::sync::Arc;
 
 use super::arena_trait::ArenaChunk;
 use super::ArenaBox;
-use super::misc::read_memory_segment;
 
 /// A single 'chunk' or 'block' of allocated memory.
 /// 
@@ -81,13 +79,6 @@ impl Drop for SingleArena {
         unsafe {
             self.deallocate_arena()
         }
-    }
-}
-
-impl Debug for SingleArena {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let segment = unsafe { read_memory_segment(self.start_pointer.cast_const(), self.size) };
-        write!(f, "Arena values: {:?}", segment)
     }
 }
 
@@ -211,7 +202,7 @@ mod tests {
             let _ = arena.allocate(i).unwrap();
         }
 
-        let arena_values = unsafe { read_memory_segment(start_ptr.cast_const(), 100) };
+        let arena_values = unsafe { std::slice::from_raw_parts(start_ptr.cast_const(), 100) };
         assert_eq!(expected_slice.as_slice(), arena_values);
     }
 
@@ -242,7 +233,7 @@ mod tests {
         assert!(arena.allocate(0).is_none());
 
         // all values should be 10 or 20
-        let arena_values = unsafe { read_memory_segment(start_ptr.cast_const(), 64) };
+        let arena_values = unsafe { std::slice::from_raw_parts(start_ptr.cast_const(), 64) };
         for val in arena_values.iter().cloned() {
             assert!(val == 10 || val == 20)
         }
