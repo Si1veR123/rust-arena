@@ -5,6 +5,7 @@ use std::ptr::NonNull;
 
 use super::ArenaBox;
 
+/// A simple arena based allocator, which uses a linked list of chunks of memory.
 pub trait ArenaAllocator<C: ArenaChunk> {
     fn new() -> Self;
     fn allocate<T>(&self, object: T) -> ArenaBox<T, C>;
@@ -30,7 +31,7 @@ pub trait ArenaChunk: Sized {
 
     /// Set the free pointer to a new pointer.
     /// 
-    /// UB if the pointer is set outside of the arena, or overwrites allocated objects.
+    /// UB if the pointer is set outside of the arena, overwrites allocated objects, or is a null/invalid pointer.
     unsafe fn set_free_pointer(&self, ptr: *mut u8);
 
     /// The remaining capacity of the chunk in bytes.
@@ -84,7 +85,7 @@ pub trait ArenaChunk: Sized {
     /// 
     /// Adjusts the free pointer and allocation count accordingly.
     /// 
-    /// Free pointer + offset should be an aligned address for the object
+    /// Free pointer + offset should be an aligned address for the object.
     unsafe fn write_to_memory<'a, T>(&'a self, object: T, byte_size: usize, offset: usize) -> ArenaBox<'a, T, Self> {
         // write the object to memory at the free pointer
         // offset should make the allocation be aligned
@@ -95,7 +96,7 @@ pub trait ArenaChunk: Sized {
 
         self.adjust_allocation_count(1);
         
-        // safety:: object pointer is non-null
+        // safety: object pointer is non-null
         ArenaBox::new(&self, NonNull::new_unchecked(object_pointer))
     }
 

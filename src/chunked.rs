@@ -14,6 +14,7 @@ pub struct Arena {
 }
 
 impl Arena {
+    /// UB if the constant CHUNK_SIZE is 0 and min_size is 0 (not very likely)
     unsafe fn new_chunk(&self, min_size: usize) {
         let chunk = SingleArena::new_unchecked(std::cmp::max(min_size, CHUNK_SIZE));
         self.chunks.push(chunk);
@@ -27,6 +28,10 @@ impl ArenaAllocator<SingleArena> for Arena {
 
     fn allocate<'a, T>(&'a self, object: T) -> ArenaBox<'a, T, SingleArena> {
         let allocation_size = size_of_val(&object);
+
+        if allocation_size == 0 {
+            return ArenaBox::new_zero_sized()
+        }
 
         let chunk_opt = unsafe { self.chunks.last() };
         if let Some(chunk) = chunk_opt {

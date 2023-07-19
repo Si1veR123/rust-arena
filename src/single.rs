@@ -30,24 +30,20 @@ impl ArenaChunk for SingleArena {
     fn allocate<T>(&self, object: T) -> Option<ArenaBox<T, Self>> {
         let allocation_size = size_of_val(&object);
 
-        unsafe {
-            // handle zst
-            if allocation_size == 0 {
-                return Some(ArenaBox::new(&self, NonNull::dangling()))
-            }
+        // handle zst
+        if allocation_size == 0 {
+            return Some(ArenaBox::new_zero_sized())
         }
 
         let offset = self.get_free_pointer_mut().align_offset(align_of_val(&object));
 
-        unsafe {
-            // safety: free pointer is guaranteed to be within the arena, provided that no unchecked allocations have been made
-            //         start pointer is guaranteed to be within the arena
-            // checks that there is enough free space to allocate this object
-            if allocation_size + offset <= self.remaining_capacity() {
-                Some(self.write_to_memory(object, allocation_size, offset))
-            } else {
-                None
-            }
+        // checks that there is enough free space to allocate this object
+        if allocation_size.checked_add(offset)? <= self.remaining_capacity() {
+            // safety: byte size is greater or equal to allocation size,
+            // and there is enough remaining capacity to store the object.
+            unsafe { Some(self.write_to_memory(object, allocation_size, offset)) }
+        } else {
+            None
         }
     }
 
@@ -56,6 +52,7 @@ impl ArenaChunk for SingleArena {
         self.start_pointer
     }
 
+    #[inline]
     fn get_free_pointer_mut(&self) -> *mut u8 {
         self.free_pointer.get()
     }
@@ -80,6 +77,7 @@ impl ArenaChunk for SingleArena {
 
 impl Drop for SingleArena {
     fn drop(&mut self) {
+        // drop means that there are no other references to the chunk, it can be safely deallocated.
         unsafe {
             self.deallocate_arena()
         }
@@ -107,7 +105,7 @@ pub struct AtomicSingleArena {
 }
 
 impl AtomicSingleArena {
-    // similar to write_to_memory, however uses a mutex lock on the free pointer
+    /// Similar to write_to_memory, however uses a mutex lock on the free pointer
     unsafe fn write_to_memory_with_lock<T>(&self, mut ptr_lock: MutexGuard<'_, usize>, object: T, byte_size: usize, offset: usize) -> ArenaBox<T, Self> {
         let ptr = (*ptr_lock as *mut u8).add(offset);
 
@@ -118,7 +116,7 @@ impl AtomicSingleArena {
         *ptr_lock = ptr_lock.add(byte_size + offset);
         self.adjust_allocation_count(1);
 
-        // safety: object pointer is non-null
+        // safety: free pointer and therefore object pointer is non-null
         ArenaBox::new(&self, NonNull::new_unchecked(object_pointer))
     }
 }
@@ -133,23 +131,21 @@ impl ArenaChunk for AtomicSingleArena {
         let allocation_size = size_of_val(&object);
 
         // handle zst
-        unsafe {
-            if allocation_size == 0 {
-                return Some(ArenaBox::new(&self, NonNull::dangling()))
-            }
+        if allocation_size == 0 {
+            return Some(ArenaBox::new_zero_sized())
         }
 
         let ptr_lock = self.free_pointer.lock().ok()?;
         let offset = (*ptr_lock as *mut u8).align_offset(align_of_val(&object));
-        unsafe {
-            // safety: free pointer is guaranteed to be within the arena, provided that no unchecked allocations have been made
-            //         start pointer is guaranteed to be within the arena
-            // checks that there is enough free space to allocate this object
-            if ptr_lock.add(allocation_size) <= self.start_pointer + self.size {
-                Some(self.write_to_memory_with_lock(ptr_lock, object, allocation_size, offset))
-            } else {
-                None
-            }
+
+        // checks that there is enough free space to allocate this object
+        if ptr_lock.checked_add(allocation_size)? <= self.start_pointer + self.size {
+            // safety: byte size is greater or equal to allocation size,
+            // and there is enough remaining capacity to store the object.
+            // the free pointer is a valid pointer.
+            unsafe { Some(self.write_to_memory_with_lock(ptr_lock, object, allocation_size, offset)) }
+        } else {
+            None
         }
     }
 
@@ -196,13 +192,6 @@ impl Drop for AtomicSingleArena {
             // safety: there are no more references to the arena except the one being dropped. the arena can be deallocated.
             unsafe { self.deallocate_arena() }
         }
-    }
-}
-
-impl Debug for AtomicSingleArena {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let segment = unsafe { read_memory_segment((self.start_pointer as *mut u8).cast_const(), self.size) };
-        write!(f, "Arena values: {:?}", segment)
     }
 }
 
