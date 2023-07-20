@@ -1,9 +1,9 @@
-pub mod single;
+pub mod single_chunk;
 
 mod chunk_linked_list;
 
-mod chunked;
-pub use chunked::*;
+mod arena;
+pub use arena::*;
 
 mod arena_box;
 pub use arena_box::*;

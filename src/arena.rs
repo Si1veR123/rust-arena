@@ -1,4 +1,4 @@
-use crate::single::SingleArena;
+use crate::single_chunk::SingleArena;
 
 use super::ArenaChunk;
 use super::ArenaAllocator;

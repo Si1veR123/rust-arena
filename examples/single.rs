@@ -1,4 +1,4 @@
-use arena::single::SingleArena;
+use arena::single_chunk::SingleArena;
 use arena::ArenaChunk;
 use std::time::Instant;
 
