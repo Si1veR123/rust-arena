@@ -14,11 +14,19 @@ impl<T> UnshrinkableLinkedList<T> {
         Self { inner: UnsafeCell::new(LinkedList::new()) }
     }
 
-    /// Unsafe as using push or extend will change the last value in the list.
-    /// 
-    /// Using this method may result in different items if the list is changed.
-    pub unsafe fn last(&self) -> Option<&T> {
-        (&*self.inner.get()).back()
+    /// Using this method may result in different items if the list is changed, using interior mutability.
+    pub fn last(&self) -> Option<&T> {
+        // safety: unsafe cell has a valid and dereferenceable pointer,
+        // and no mutable references are released to the linked list
+        unsafe { (&*self.inner.get()).back() }
+    }
+
+    /// Using this method may result in different items if the list is changed, using interior mutability.
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        // safety: unsafe cell has a valid and dereferenceable pointer,
+        // and no mutable references are released to the linked list
+        unsafe { (&*self.inner.get()).len() }
     }
 
     pub fn push(&self, object: T) {
