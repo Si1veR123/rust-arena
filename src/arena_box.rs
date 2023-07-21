@@ -3,7 +3,7 @@ use std::{
 };
 use super::ArenaChunk;
 
-/// A wrapper around box that points to memory allocated in an arena.
+/// A wrapper around a pointer that owns memory allocated in an arena.
 pub struct ArenaBox<'a, T, A: ArenaChunk> {
     inner: NonNull<T>,
     // Zero Sized Types don't belong to an arena chunk
@@ -13,7 +13,8 @@ pub struct ArenaBox<'a, T, A: ArenaChunk> {
 }
 
 impl<'a, T, A: ArenaChunk> ArenaBox<'a, T, A> {
-    /// Non-null pointer must be aligned, and point to a valid T
+    /// # Safety
+    /// Non-null pointer must be aligned, and point to a valid T.
     pub unsafe fn new(arena: &'a A, object: NonNull<T>) -> Self {
         Self { inner: object, arena: Some(arena), phantom: PhantomData }
     }
@@ -37,14 +38,16 @@ impl<'a, T, A: ArenaChunk> ArenaBox<'a, T, A> {
 
     /// Returns a mut pointer to the T allocated in the arena.
     /// 
-    /// Safety: pointer must not be used after the arena box is dropped
+    /// # Safety
+    /// Pointer must not be used after the arena box is dropped.
     pub unsafe fn mut_ptr(arena_box: &mut ArenaBox<'_, T, A>) -> *mut T {
         arena_box.inner.as_mut()
     }
 
     /// Returns a const pointer to the T allocated in the arena.
     /// 
-    /// Safety: pointer must not be used after the arena box is dropped
+    /// # Safety
+    /// Pointer must not be used after the arena box is dropped.
     pub unsafe fn const_ptr(arena_box: &ArenaBox<'_, T, A>) -> *const T {
         arena_box.inner.as_ptr()
     }

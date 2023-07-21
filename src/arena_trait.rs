@@ -15,6 +15,7 @@ pub trait ArenaAllocator<C: ArenaChunk> {
 pub trait ArenaChunk: Sized {
     /// Create a new chunk without checking whether the size is valid
     /// 
+    /// # Safety
     /// Can cause UB if size is 0
     unsafe fn new_unchecked(size: usize) -> Self;
 
@@ -31,6 +32,7 @@ pub trait ArenaChunk: Sized {
 
     /// Set the free pointer to a new pointer.
     /// 
+    /// # Safety
     /// UB if the pointer is set outside of the arena, overwrites allocated objects, or is a null/invalid pointer.
     unsafe fn set_free_pointer(&self, ptr: *mut u8);
 
@@ -53,12 +55,12 @@ pub trait ArenaChunk: Sized {
         }
     }
 
-    /// Allocate the memory needed for this chunk.
+    /// Allocate the memory needed for this chunk and return a pointer to the start of the allocation.
     /// 
-    /// Returns a pointer to the start of the allocation.
-    /// 
-    /// UB if size is 0.
     /// Aborts process in an allocation error.
+    /// 
+    /// # Safety
+    /// UB if size is 0.
     unsafe fn intialise_chunk(size: usize) -> *mut u8 {
         // safety: align of one byte means that none of the checks are necessary
         // CAN BE UNSAFE IF SIZE IS 0
@@ -75,6 +77,9 @@ pub trait ArenaChunk: Sized {
     /// * If it is a ZST
     /// 
     /// * If there is enough remaining capacity for the object
+    /// 
+    /// # Safety
+    /// If the listed requirements aren't checked, it may result in UB.
     unsafe fn allocate_unchecked<T>(&self, object: T) -> ArenaBox<T, Self> {
         let allocation_size = size_of::<T>();
         let offset = self.get_free_pointer_mut().align_offset(align_of::<T>());
@@ -85,8 +90,9 @@ pub trait ArenaChunk: Sized {
     /// 
     /// Adjusts the free pointer and allocation count accordingly.
     /// 
-    /// Free pointer + offset should be an aligned address for the object.
-    unsafe fn write_to_memory<'a, T>(&'a self, object: T, byte_size: usize, offset: usize) -> ArenaBox<'a, T, Self> {
+    /// # Safety
+    /// Free pointer + offset should be an aligned address for the object, and valid for writes.
+    unsafe fn write_to_memory<T>(&self, object: T, byte_size: usize, offset: usize) -> ArenaBox<T, Self> {
         // write the object to memory at the free pointer
         // offset should make the allocation be aligned
         let object_pointer = self.get_free_pointer_mut().add(offset).cast::<T>();
@@ -97,13 +103,13 @@ pub trait ArenaChunk: Sized {
         self.adjust_allocation_count(1);
         
         // safety: object pointer is non-null
-        ArenaBox::new(&self, NonNull::new_unchecked(object_pointer))
+        ArenaBox::new(self, NonNull::new_unchecked(object_pointer))
     }
 
-    /// Deallocate the memory used by the arena.
+    /// Deallocate the memory used by the arena. Memory is deallocated when the chunk is dropped.
     /// 
+    /// # Safety
     /// UB if used after deallocated.
-    /// Memory is deallocated when the chunk is dropped.
     unsafe fn deallocate_arena(&mut self) {
         // safety: align of one byte means that none of the checks are necessary
         let layout = Layout::from_size_align_unchecked(self.size(), 1);

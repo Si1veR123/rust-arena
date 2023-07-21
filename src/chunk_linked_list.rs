@@ -18,7 +18,7 @@ impl<T> UnshrinkableLinkedList<T> {
     pub fn last(&self) -> Option<&T> {
         // safety: unsafe cell has a valid and dereferenceable pointer,
         // and no mutable references are released to the linked list
-        unsafe { (&*self.inner.get()).back() }
+        unsafe { (*self.inner.get()).back() }
     }
 
     /// Using this method may result in different items if the list is changed, using interior mutability.
@@ -26,7 +26,7 @@ impl<T> UnshrinkableLinkedList<T> {
     pub fn len(&self) -> usize {
         // safety: unsafe cell has a valid and dereferenceable pointer,
         // and no mutable references are released to the linked list
-        unsafe { (&*self.inner.get()).len() }
+        unsafe { (*self.inner.get()).len() }
     }
 
     pub fn push(&self, object: T) {
